@@ -28,7 +28,7 @@ export default function ProjectHeader({ project, id }: Props) {
         </Link>
       </div>
       {project.description && (
-        <p className="mt-1 text-sm text-gray-500 truncate">{project.description}</p>
+        <p className="mt-1 text-sm text-gray-500 truncate" title={project.description}>{project.description}</p>
       )}
     </div>
   );

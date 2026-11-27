@@ -1,11 +1,11 @@
 import { useTranslation } from 'react-i18next';
-import { Project, Todo, Milestone, Activity, Session, Environment } from '../../../api/client';
+import { Project, Todo, Milestone, Activity, Environment } from '../../../api/client';
 import type { Tab } from '../tabs';
 import ActivityList from '../../ActivityList';
-import OverviewStatRow, { StatItem } from './OverviewStatRow';
-import OverviewTodos from './OverviewTodos';
-import OverviewMilestones from './OverviewMilestones';
+import OverviewOpen from './OverviewOpen';
 import ProjectProfileCard from './ProjectProfileCard';
+
+const ACTIVITY_LIMIT = 5;
 
 interface Props {
   project: Project;
@@ -13,7 +13,6 @@ interface Props {
   todos: Todo[];
   milestones: Milestone[];
   activities: Activity[];
-  sessions: Session[];
   environments: Environment[];
   openOracleCount: number;
   openDocProposalsCount: number;
@@ -21,34 +20,21 @@ interface Props {
 }
 
 export default function ProjectOverview({
-  project, id, todos, milestones, activities, sessions, environments,
+  project, id, todos, milestones, activities, environments,
   openOracleCount, openDocProposalsCount, onNavigate,
 }: Props) {
-  const { t, i18n } = useTranslation();
-  const dateFmtLocale = i18n.language === 'de' ? 'de-DE' : 'en-US';
-
-  const openTodos = todos.filter((td) => td.status !== 'done' && !td.archived).length;
-  const activeMilestones = milestones.filter((m) => m.status !== 'done' && !m.archived).length;
-  const lastSession = sessions[0]?.createdAt
-    ? new Date(sessions[0].createdAt).toLocaleDateString(dateFmtLocale)
-    : t('projectDetail.overview.lastSessionNever');
-
-  const stats: StatItem[] = [
-    { key: 'todos', label: t('projectDetail.tab.todos'), value: openTodos, tab: 'todos' },
-    { key: 'milestones', label: t('projectDetail.tab.milestones'), value: activeMilestones, tab: 'milestones' },
-    { key: 'oracle', label: t('projectDetail.tab.oracle'), value: openOracleCount, tab: 'oracle' },
-    { key: 'docs', label: t('projectDetail.tab.docsHealth'), value: openDocProposalsCount, tab: 'docs-health' },
-    { key: 'sessions', label: t('projectDetail.tab.sessions'), value: lastSession, tab: 'sessions' },
-  ];
+  const { t } = useTranslation();
 
   return (
     <div className="space-y-6">
-      <OverviewStatRow stats={stats} onNavigate={onNavigate} />
-
-      <div className="grid md:grid-cols-2 gap-4">
-        <OverviewTodos todos={todos} projectId={id} onViewAll={() => onNavigate('todos')} />
-        <OverviewMilestones milestones={milestones} todos={todos} onViewAll={() => onNavigate('milestones')} />
-      </div>
+      <OverviewOpen
+        projectId={id}
+        todos={todos}
+        milestones={milestones}
+        openOracleCount={openOracleCount}
+        openDocProposalsCount={openDocProposalsCount}
+        onNavigate={onNavigate}
+      />
 
       <ProjectProfileCard
         project={project}
@@ -64,7 +50,7 @@ export default function ProjectOverview({
             {t('projectDetail.overview.viewAll')}
           </button>
         </div>
-        <ActivityList activities={activities.slice(0, 8)} />
+        <ActivityList activities={activities.slice(0, ACTIVITY_LIMIT)} />
       </div>
     </div>
   );

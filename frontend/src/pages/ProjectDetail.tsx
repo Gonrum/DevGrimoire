@@ -453,7 +453,7 @@ export default function ProjectDetail() {
 
         {/* Content area */}
         <div className="flex-1 min-w-0">
-          <ProjectTabShell title={currentTabLabel} description={currentTabDescription} count={currentTabCount}>
+          <ProjectTabShell title={currentTabLabel} description={currentTabDescription} count={currentTabCount} hideHeader={tab === 'overview'}>
             {tab === 'overview' && (
               <ProjectOverview
                 project={project}
@@ -461,7 +461,6 @@ export default function ProjectDetail() {
                 todos={todos}
                 milestones={milestones}
                 activities={activities}
-                sessions={sessions}
                 environments={environments}
                 openOracleCount={openOracleCount}
                 openDocProposalsCount={openDocProposalsCount}

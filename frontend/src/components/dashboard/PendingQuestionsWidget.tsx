@@ -15,6 +15,10 @@ interface Props {
   /** Initial direction filter. Default: undefined → both. */
   initialDirection?: QuestionDirection;
   className?: string;
+  /** Render nothing (instead of an empty-state box) once loaded with zero questions. */
+  hideWhenEmpty?: boolean;
+  /** Reports the unfiltered open-question total after each load (pass a stable setter). */
+  onTotalChange?: (total: number) => void;
 }
 
 const PAGE_SIZE = 8;
@@ -25,7 +29,7 @@ const PAGE_SIZE = 8;
  * question opens an answer modal; user→agent questions deep-link to the
  * corresponding todo (where the agent's reply will land).
  */
-export default function PendingQuestionsWidget({ projectId, initialDirection, className = '' }: Props) {
+export default function PendingQuestionsWidget({ projectId, initialDirection, className = '', hideWhenEmpty = false, onTotalChange }: Props) {
   const { t, i18n } = useTranslation();
   const { showSuccess, showError } = useToast();
   const [items, setItems] = useState<Question[]>([]);
@@ -143,6 +147,13 @@ export default function PendingQuestionsWidget({ projectId, initialDirection, cl
     ),
     [direction, t],
   );
+
+  useEffect(() => {
+    if (!loading && direction === '') onTotalChange?.(total);
+  }, [loading, direction, total, onTotalChange]);
+
+  // A direction filter narrows the list, so only hide when unfiltered.
+  if (hideWhenEmpty && !loading && items.length === 0 && direction === '' && !activeQuestion) return null;
 
   return (
     <section

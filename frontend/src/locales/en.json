@@ -1104,7 +1104,8 @@
     "system": "Chamber",
     "search": "Search tabs…",
     "collapse": "Collapse",
-    "expand": "Expand"
+    "expand": "Expand",
+    "more": "More"
   },
   "projectDetail": {
     "tab": {
@@ -1174,7 +1175,14 @@
       "viewAll": "View all",
       "noOpenTodos": "No open todos",
       "noActiveMilestones": "No active milestones",
-      "lastSessionNever": "—"
+      "lastSessionNever": "—",
+      "allClear": "All clear – nothing open",
+      "moreTodos": "+{{count}} more quests",
+      "oracleHints": "{{count}} open oracle hints",
+      "docProposals": "{{count}} open lore proposals",
+      "components": "{{count}} components",
+      "showAll": "+{{count}} more",
+      "showLess": "less"
     }
   },
   "projectAccess": {

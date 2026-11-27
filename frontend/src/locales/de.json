@@ -1104,7 +1104,8 @@
     "system": "Kammer",
     "search": "Tabs durchsuchen…",
     "collapse": "Einklappen",
-    "expand": "Ausklappen"
+    "expand": "Ausklappen",
+    "more": "Mehr"
   },
   "projectDetail": {
     "tab": {
@@ -1174,7 +1175,14 @@
       "viewAll": "Alle anzeigen",
       "noOpenTodos": "Keine offenen Quests",
       "noActiveMilestones": "Keine aktiven Artefakte",
-      "lastSessionNever": "—"
+      "lastSessionNever": "—",
+      "allClear": "Alles erledigt – nichts offen",
+      "moreTodos": "+{{count}} weitere Quests",
+      "oracleHints": "{{count}} offene Orakel-Hinweise",
+      "docProposals": "{{count}} offene Lore-Vorschläge",
+      "components": "{{count}} Komponenten",
+      "showAll": "+{{count}} mehr",
+      "showLess": "weniger"
     }
   },
   "projectAccess": {

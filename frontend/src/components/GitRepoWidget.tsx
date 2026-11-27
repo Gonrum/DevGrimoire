@@ -171,12 +171,9 @@ export default function GitRepoWidget({ projectId, gitRepositories, onNavigateTo
                   disabled={syncing !== null || repo.syncEnabled === false}
                   className="text-xs text-gray-500 hover:text-violet-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors px-1.5 py-0.5"
                   title="Sync"
+                  aria-label="Sync"
                 >
-                  {syncing === i ? (
-                    <span className="animate-spin inline-block">&#8635;</span>
-                  ) : (
-                    '&#8635;'
-                  )}
+                  <span className={syncing === i ? 'animate-spin inline-block' : 'inline-block'}>&#8635;</span>
                 </button>
               </div>
             </div>
