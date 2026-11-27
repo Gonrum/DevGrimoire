@@ -4,19 +4,21 @@
  * compile and test it standalone.
  */
 
-/** Rarely used system tabs, tucked away under a collapsible "more" section. */
-export const MORE_TABS: readonly string[] = [
+/** Rarely used project tabs, tucked away under a collapsible "more" section. */
+export const PROJECT_MORE_TABS: readonly string[] = [
   'http-requests', 'ssh', 'kube', 'recurring-tasks', 'workflows', 'commits', 'logs', 'access',
 ];
 
-export function isMoreTab(key: string): boolean {
-  return MORE_TABS.includes(key);
-}
+/** Same idea for the customer page (`automation` = workflow definitions there). */
+export const CUSTOMER_MORE_TABS: readonly string[] = ['ssh', 'kube', 'automation'];
 
-export function splitMore<T extends { key: string }>(items: T[]): { main: T[]; more: T[] } {
+export function splitMore<T extends { key: string }>(
+  items: T[],
+  moreKeys: readonly string[],
+): { main: T[]; more: T[] } {
   const main: T[] = [];
   const more: T[] = [];
-  for (const item of items) (isMoreTab(item.key) ? more : main).push(item);
+  for (const item of items) (moreKeys.includes(item.key) ? more : main).push(item);
   return { main, more };
 }
 
@@ -24,8 +26,13 @@ export function splitMore<T extends { key: string }>(items: T[]): { main: T[]; m
  * The section is forced open when the active tab lives in it (deep link) or
  * while searching, so navigation never hides behind a collapsed toggle.
  */
-export function moreOpen(stored: boolean, activeKey: string, searching: boolean): boolean {
-  return stored || searching || isMoreTab(activeKey);
+export function moreOpen(
+  stored: boolean,
+  activeKey: string,
+  searching: boolean,
+  moreKeys: readonly string[],
+): boolean {
+  return stored || searching || moreKeys.includes(activeKey);
 }
 
 export function showCount(count: number | undefined): count is number {

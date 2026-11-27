@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PanelLeftClose, PanelLeftOpen, ChevronDown, ChevronRight, Search } from 'lucide-react';
-import { NavGroup, NavItem, Tab, TAB_ICON } from './tabs';
+import type { LucideIcon } from 'lucide-react';
 import { splitMore, moreOpen, showCount } from '../../lib/project-detail-view';
 import { parseJsonText } from '../../api/http-boundary';
 import { isRecord } from '../../lib/narrow';
 
-const LS_COLLAPSED = 'dg.projectSidebar.collapsed';
-const LS_GROUPS = 'dg.projectSidebar.groups';
-const LS_MORE = 'dg.projectSidebar.more';
 
 function readBool(key: string): boolean {
   try { return localStorage.getItem(key) === '1'; } catch { return false; }
@@ -20,10 +17,10 @@ function readBool(key: string): boolean {
  * `Record<string, boolean>` und von dort in `groupState`. Ein `{"foo": "bar"}`
  * im Storage hätte einen String als Boolean in den State gelegt.
  */
-function readGroups(): Record<string, boolean> {
+function readGroups(key: string): Record<string, boolean> {
   let raw: string | null;
   try {
-    raw = localStorage.getItem(LS_GROUPS);
+    raw = localStorage.getItem(key);
   } catch {
     return {};
   }
@@ -42,33 +39,55 @@ function readGroups(): Record<string, boolean> {
   return out;
 }
 
-interface Props {
-  groups: NavGroup[];
-  activeTab: Tab;
-  onSelect: (tab: Tab) => void;
+export interface SidebarItem<K extends string> {
+  key: K;
+  label: string;
+  count?: number;
+}
+
+export interface SidebarGroup<K extends string> {
+  label: string;
+  items: SidebarItem<K>[];
+}
+
+interface Props<K extends string> {
+  groups: SidebarGroup<K>[];
+  activeTab: K;
+  onSelect: (tab: K) => void;
+  icons: Record<K, LucideIcon>;
+  /** Keys rendered under the collapsible "more" section. */
+  moreKeys: readonly string[];
+  /** localStorage prefix, so project and customer pages keep separate state. */
+  storageKey: string;
   variant?: 'desktop' | 'drawer';
 }
 
-export default function ProjectSidebar({ groups, activeTab, onSelect, variant = 'desktop' }: Props) {
+/** Detail-page sidebar shared by project and customer pages. */
+export default function ProjectSidebar<K extends string>({
+  groups, activeTab, onSelect, icons, moreKeys, storageKey, variant = 'desktop',
+}: Props<K>) {
+  const LS_COLLAPSED = `${storageKey}.collapsed`;
+  const LS_GROUPS = `${storageKey}.groups`;
+  const LS_MORE = `${storageKey}.more`;
   const { t } = useTranslation();
   // Drawer (mobile) ist immer voll ausgeklappt; Minimieren nur auf dem Desktop.
   const [collapsed, setCollapsed] = useState(() => variant === 'desktop' && readBool(LS_COLLAPSED));
-  const [groupState, setGroupState] = useState<Record<string, boolean>>(readGroups);
+  const [groupState, setGroupState] = useState<Record<string, boolean>>(() => readGroups(LS_GROUPS));
   const [search, setSearch] = useState('');
   const [moreStored, setMoreStored] = useState(() => readBool(LS_MORE));
 
   useEffect(() => {
     if (variant !== 'desktop') return;
     try { localStorage.setItem(LS_COLLAPSED, collapsed ? '1' : '0'); } catch { /* ignore */ }
-  }, [collapsed, variant]);
+  }, [collapsed, variant, LS_COLLAPSED]);
 
   useEffect(() => {
     try { localStorage.setItem(LS_GROUPS, JSON.stringify(groupState)); } catch { /* ignore */ }
-  }, [groupState]);
+  }, [groupState, LS_GROUPS]);
 
   useEffect(() => {
     try { localStorage.setItem(LS_MORE, moreStored ? '1' : '0'); } catch { /* ignore */ }
-  }, [moreStored]);
+  }, [moreStored, LS_MORE]);
 
   const q = search.trim().toLowerCase();
   const searching = q.length > 0 && !collapsed;
@@ -76,16 +95,15 @@ export default function ProjectSidebar({ groups, activeTab, onSelect, variant = 
   const toggleGroup = (label: string) =>
     setGroupState((s) => ({ ...s, [label]: !s[label] }));
 
-  const filterItems = (items: NavItem[]) =>
+  const filterItems = (items: SidebarItem<K>[]) =>
     searching ? items.filter((it) => it.label.toLowerCase().includes(q)) : items;
-  const moreItems = filterItems(groups.flatMap((g) => splitMore(g.items).more));
-  // Drawer has no persisted toggle state of its own; it shares the desktop key.
-  const showMore = moreOpen(moreStored, activeTab, searching);
+  const moreItems = filterItems(groups.flatMap((g) => splitMore(g.items, moreKeys).more));
+  const showMore = moreOpen(moreStored, activeTab, searching, moreKeys);
 
-  const renderList = (items: NavItem[]) => (
+  const renderList = (items: SidebarItem<K>[]) => (
     <ul className="space-y-0.5">
       {items.map((item) => {
-        const Icon = TAB_ICON[item.key];
+        const Icon: LucideIcon = icons[item.key];
         const active = activeTab === item.key;
         const hasCount = showCount(item.count);
         return (
@@ -157,7 +175,7 @@ export default function ProjectSidebar({ groups, activeTab, onSelect, variant = 
 
       <div className="space-y-4">
         {groups.map((group, gi) => {
-          const items = filterItems(splitMore(group.items).main);
+          const items = filterItems(splitMore(group.items, moreKeys).main);
           if (items.length === 0) return null;
           const groupCollapsed = !searching && !collapsed && groupState[group.label];
 

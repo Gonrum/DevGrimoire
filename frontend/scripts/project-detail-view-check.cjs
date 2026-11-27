@@ -20,7 +20,7 @@ try {
   console.error(err.stdout ? err.stdout.toString() : err.message);
   process.exit(1);
 }
-const { MORE_TABS, splitMore, moreOpen, showCount, pickOpenTodos } = require(path.join(outDir, 'project-detail-view.js'));
+const { PROJECT_MORE_TABS, CUSTOMER_MORE_TABS, splitMore, moreOpen, showCount, pickOpenTodos } = require(path.join(outDir, 'project-detail-view.js'));
 
 let failures = 0;
 function check(label, fn) {
@@ -30,21 +30,26 @@ function check(label, fn) {
   }
 }
 
-check('MORE_TABS holds exactly the agreed keys', () => {
-  assert.deepEqual([...MORE_TABS].sort(), ['access', 'commits', 'http-requests', 'kube', 'logs', 'recurring-tasks', 'ssh', 'workflows']);
+check('more-tab lists hold exactly the agreed keys', () => {
+  assert.deepEqual([...CUSTOMER_MORE_TABS].sort(), ['automation', 'kube', 'ssh']);
+  assert.deepEqual([...PROJECT_MORE_TABS].sort(), ['access', 'commits', 'http-requests', 'kube', 'logs', 'recurring-tasks', 'ssh', 'workflows']);
 });
 
 check('splitMore keeps order and separates more-tabs', () => {
-  const r = splitMore([{ key: 'soul' }, { key: 'logs' }, { key: 'workspaces' }, { key: 'ssh' }]);
+  const r = splitMore([{ key: 'soul' }, { key: 'logs' }, { key: 'workspaces' }, { key: 'ssh' }], PROJECT_MORE_TABS);
   assert.deepEqual(r.main.map((i) => i.key), ['soul', 'workspaces']);
   assert.deepEqual(r.more.map((i) => i.key), ['logs', 'ssh']);
 });
 
 check('moreOpen: stored, active inside, or searching', () => {
-  assert.equal(moreOpen(false, 'logs', false), true);
-  assert.equal(moreOpen(false, 'soul', false), false);
-  assert.equal(moreOpen(false, 'soul', true), true);
-  assert.equal(moreOpen(true, 'soul', false), true);
+  const m = PROJECT_MORE_TABS;
+  assert.equal(moreOpen(false, 'logs', false, m), true);
+  assert.equal(moreOpen(false, 'soul', false, m), false);
+  assert.equal(moreOpen(false, 'soul', true, m), true);
+  assert.equal(moreOpen(true, 'soul', false, m), true);
+  // customer keys differ: `workflows` is a main tab there
+  assert.equal(moreOpen(false, 'workflows', false, CUSTOMER_MORE_TABS), false);
+  assert.equal(moreOpen(false, 'automation', false, CUSTOMER_MORE_TABS), true);
 });
 
 check('showCount only for positive numbers', () => {

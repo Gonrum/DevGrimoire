@@ -42,6 +42,7 @@ import ProjectOverview from '../components/projects/overview/ProjectOverview';
 import { useAuth } from '../hooks/useAuth';
 import { TAB_ICON, type Tab, type NavGroup } from '../components/projects/tabs';
 import ProjectSidebar from '../components/projects/ProjectSidebar';
+import { PROJECT_MORE_TABS } from '../lib/project-detail-view';
 import { errorMessage } from '../lib/narrow';
 
 /**
@@ -439,6 +440,9 @@ export default function ProjectDetail() {
               groups={navGroups}
               activeTab={tab}
               onSelect={(k) => { setTab(k); setSidebarOpen(false); }}
+              icons={TAB_ICON}
+              moreKeys={PROJECT_MORE_TABS}
+              storageKey="dg.projectSidebar"
               variant="drawer"
             />
           </div>
@@ -448,7 +452,7 @@ export default function ProjectDetail() {
       <div className="flex gap-6">
         {/* Desktop: Fixed sidebar */}
         <div className="hidden lg:block shrink-0 sticky top-4 self-start max-h-[calc(100vh-2rem)] overflow-y-auto">
-          <ProjectSidebar groups={navGroups} activeTab={tab} onSelect={setTab} />
+          <ProjectSidebar groups={navGroups} activeTab={tab} onSelect={setTab} icons={TAB_ICON} moreKeys={PROJECT_MORE_TABS} storageKey="dg.projectSidebar" />
         </div>
 
         {/* Content area */}

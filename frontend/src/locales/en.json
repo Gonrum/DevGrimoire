@@ -370,6 +370,7 @@
     "allCustomers": "All Customers",
     "customerFile": "Customer File",
     "quickFacts": "Quick Facts",
+    "projectQuests": "Quests from engagements",
     "linkedProjects": "Deployments",
     "openCustomerTodos": "Open Customer Quests",
     "openProjectTodosAggregated": "({{count}} from deployments)",

@@ -42,6 +42,15 @@ import { LoadingText } from '../components/ui/LoadingSpinner';
 import { useToast } from '../components/Toast';
 import { WorkflowProjectTab } from '../components/workflows/WorkflowProjectTab';
 import { errorMessage } from '../lib/narrow';
+import type { LucideIcon } from 'lucide-react';
+import {
+  LayoutDashboard, Briefcase, CheckSquare, Activity as ActivityIcon, BookOpen, BookMarked, Repeat,
+  Paperclip, Ghost, Scissors, FlaskConical, Settings2, KeyRound, HeartPulse, TerminalSquare,
+  Container, Workflow, Users,
+} from 'lucide-react';
+import ProjectSidebar, { type SidebarGroup } from '../components/projects/ProjectSidebar';
+import CustomerOverviewOpen from '../components/customers/CustomerOverviewOpen';
+import { CUSTOMER_MORE_TABS } from '../lib/project-detail-view';
 
 /** Gültige Tab-Keys; `?tab=` ist beliebiger Text und wird dagegen geprüft. */
 const TABS = [
@@ -65,6 +74,27 @@ const TABS = [
   'automation',
 ] as const;
 type Tab = (typeof TABS)[number];
+
+const TAB_ICON: Record<Tab, LucideIcon> = {
+  overview: LayoutDashboard,
+  projects: Briefcase,
+  todos: CheckSquare,
+  activity: ActivityIcon,
+  knowledge: BookOpen,
+  manual: BookMarked,
+  workflows: Repeat,
+  files: Paperclip,
+  soul: Ghost,
+  snippets: Scissors,
+  research: FlaskConical,
+  environments: Settings2,
+  secrets: KeyRound,
+  monitoring: HeartPulse,
+  ssh: TerminalSquare,
+  kube: Container,
+  automation: Workflow,
+  contacts: Users,
+};
 
 function isTab(value: string): value is Tab {
   return TABS.some((t) => t === value);
@@ -339,7 +369,7 @@ export default function CustomerDetail() {
     (secret) => secret.environmentId === null || linkedEnvIdSet.has(secret.environmentId),
   );
 
-  const navGroups: { label: string; items: { key: Tab; label: string; count?: number }[] }[] = [
+  const navGroups: SidebarGroup<Tab>[] = [
     {
       label: t('sidebar.core'),
       items: [
@@ -380,45 +410,16 @@ export default function CustomerDetail() {
   const currentTabLabel = currentTab?.label || tab;
   const currentTabCount = currentTab?.count;
 
-  const sidebarNav = (onSelect?: () => void) => (
-    <nav className="space-y-5">
-      {navGroups.map((group) => (
-        <div key={group.label}>
-          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-gray-600 px-3 mb-1.5">
-            {group.label}
-          </h3>
-          <ul className="space-y-0.5">
-            {group.items.map((item) => (
-              <li key={item.key}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTab(item.key);
-                    onSelect?.();
-                  }}
-                  className={`w-full text-left px-3 py-1.5 text-sm rounded-lg flex justify-between items-center transition-colors ${
-                    tab === item.key
-                      ? 'bg-gray-800 text-cyan-400 font-medium'
-                      : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
-                  }`}
-                >
-                  <span className="truncate">{item.label}</span>
-                  {typeof item.count === 'number' && (
-                    <span
-                      className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${
-                        tab === item.key ? 'bg-gray-700 text-cyan-400' : 'bg-gray-800/80 text-gray-500'
-                      }`}
-                    >
-                      {item.count}
-                    </span>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </nav>
+  const sidebarNav = (onSelect?: () => void, variant: 'desktop' | 'drawer' = 'desktop') => (
+    <ProjectSidebar
+      groups={navGroups}
+      activeTab={tab}
+      onSelect={(k) => { setTab(k); onSelect?.(); }}
+      icons={TAB_ICON}
+      moreKeys={CUSTOMER_MORE_TABS}
+      storageKey="dg.customerSidebar"
+      variant={variant}
+    />
   );
 
   const removeProjectLink = async (linkId: string) => {
@@ -514,9 +515,7 @@ export default function CustomerDetail() {
           </button>
         </div>
         {customer.description && (
-          <div className="mb-2 text-gray-400">
-            <Markdown>{customer.description}</Markdown>
-          </div>
+          <p className="mb-1 text-sm text-gray-500 truncate" title={customer.description}>{customer.description}</p>
         )}
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs sm:text-sm text-gray-500">
           {customer.website && <span>{t('customers.website')}: {customer.website}</span>}
@@ -590,48 +589,35 @@ export default function CustomerDetail() {
                 </svg>
               </button>
             </div>
-            {sidebarNav(() => setSidebarOpen(false))}
+            {sidebarNav(() => setSidebarOpen(false), 'drawer')}
           </div>
         </>
       )}
 
       <div className="flex gap-6">
-        <div className="hidden lg:block shrink-0 w-52 sticky top-4 self-start max-h-[calc(100vh-2rem)] overflow-y-auto">
+        <div className="hidden lg:block shrink-0 sticky top-4 self-start max-h-[calc(100vh-2rem)] overflow-y-auto">
           {sidebarNav()}
         </div>
         <div className="flex-1 min-w-0">
-          <ProjectTabShell title={currentTabLabel} count={currentTabCount}>
+          <ProjectTabShell title={currentTabLabel} count={currentTabCount} hideHeader={tab === 'overview'}>
             {tab === 'overview' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div className="lg:col-span-2 bg-gray-900 border border-gray-800 rounded-lg p-4">
-                  <h3 className="text-sm font-semibold text-gray-300 mb-2">{t('customers.customerFile')}</h3>
-                  {customer.notes ? (
+              <div className="space-y-6">
+                <CustomerOverviewOpen
+                  customerId={id}
+                  customerTodos={customerTodos}
+                  projectTodos={aggregate.todos}
+                  projectsById={projectsById}
+                  projectTodosLoading={aggLoading}
+                  onShowCustomerTodos={() => setTab('todos')}
+                />
+                {customer.notes && (
+                  <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 sm:p-5">
+                    <h3 className="text-sm font-semibold text-gray-300 mb-2">{t('customers.customerFile')}</h3>
                     <div className="text-gray-400">
                       <Markdown>{customer.notes}</Markdown>
                     </div>
-                  ) : (
-                    <EmptyState message={t('customers.noNotes')} />
-                  )}
-                </div>
-                <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-                  <h3 className="text-sm font-semibold text-gray-300">{t('customers.quickFacts')}</h3>
-                  <div className="text-sm text-gray-500 space-y-2">
-                    <p>
-                      {t('customers.linkedProjects')}: <span className="text-gray-300">{links.length}</span>
-                    </p>
-                    <p>
-                      {t('customers.openCustomerTodos')}:{' '}
-                      <span className="text-gray-300">{openCustomerTodos.length}</span>
-                    </p>
-                    <p className="text-xs text-gray-600">
-                      {t('customers.openProjectTodosAggregated', { count: openTodos.length })}
-                    </p>
-                    <p>
-                      {t('customers.tab.workflows')}:{' '}
-                      <span className="text-gray-300">{customerRecurring.filter((rt) => rt.active).length}</span>
-                    </p>
                   </div>
-                </div>
+                )}
               </div>
             )}
 
